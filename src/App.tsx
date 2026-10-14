@@ -1588,6 +1588,34 @@ export default function App() {
     });
   }, [logs, registeredTags]);
 
+  // 定義済みタグ名リスト（件数順）
+  const selectableTags = useMemo(
+    () => allTagsWithCounts.map(([tag]) => tag),
+    [allTagsWithCounts]
+  );
+
+  // 「記録」フォーム内で定義済みタグをクリック選択（追加・解除トグル）
+  const handleToggleTagInForm = useCallback((tag: string) => {
+    setFormTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  }, []);
+
+  // 「一覧・Excelプレビュー」のセル編集内で定義済みタグをクリック選択（追加・解除トグル）
+  const handleToggleTagInCellEditor = useCallback((tag: string) => {
+    setEditingCellValue((prev) => {
+      const currentList = prev
+        .split(/[,\s、]+/)
+        .map((t) => t.replace(/^#/, '').trim())
+        .filter(Boolean);
+      const exists = currentList.includes(tag);
+      const nextList = exists
+        ? currentList.filter((t) => t !== tag)
+        : [...currentList, tag];
+      return nextList.join(', ');
+    });
+  }, []);
+
   // 共通フィルタ（日付・タグ・キーワード）を通過したログ（右端に最新データが来るよう日付昇順ソート）
   const baseFilteredLogs = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1868,6 +1896,16 @@ export default function App() {
     }
 
     if (isEditingThis) {
+      const activeCellTags =
+        rowSpec.key === 'tags'
+          ? new Set(
+              editingCellValue
+                .split(/[,\s、]+/)
+                .map((t) => t.replace(/^#/, '').trim())
+                .filter(Boolean)
+            )
+          : null;
+
       return (
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
           {rowSpec.inputType === 'textarea' ? (
@@ -1909,6 +1947,40 @@ export default function App() {
               className="w-full rounded-lg border border-indigo-400 dark:border-indigo-500 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
           )}
+
+          {/* タグ編集時：定義済みタグ一覧からクリックで追加・解除 */}
+          {rowSpec.key === 'tags' && selectableTags.length > 0 && (
+            <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-1.5">
+              <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                <span>定義済みタグから選択（クリックで追加・解除）</span>
+                <span>{activeCellTags ? activeCellTags.size : 0}個選択中</span>
+              </div>
+              <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto pr-0.5">
+                {selectableTags.map((tag) => {
+                  const selected = activeCellTags?.has(tag) ?? false;
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault(); // inputのonBlur発火を防止
+                        handleToggleTagInCellEditor(tag);
+                      }}
+                      className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-medium border transition-colors ${
+                        selected
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                      }`}
+                    >
+                      {selected ? <Check className="w-2.5 h-2.5" /> : <span>+</span>}
+                      <span>#{tag}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-end gap-1.5">
             <button
               type="button"
@@ -2217,7 +2289,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setLastSavedLog(null)}
-                      className="p-1 text-emerald-700 dark:text-emerald-400 hover: opacity-75"
+                      className="p-1 text-emerald-700 dark:text-emerald-400 hover:opacity-75"
                       title="閉じる"
                     >
                       <X className="w-4 h-4" />
@@ -2668,15 +2740,15 @@ export default function App() {
                     />
                   </div>
 
-                  {/* 5. タグ（任意） */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                      タグ <span className="text-[11px] font-normal text-slate-400">(任意・Enterまたはカンマで追加)</span>
+                  {/* 5. タグ（任意：手入力＋定義済みタグからクリック選択） */}
+                  <div className="space-y-2.5">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400">
+                      タグ <span className="text-[11px] font-normal text-slate-400">(任意・手入力で新規追加、または下の定義済みタグから選択)</span>
                     </label>
                     <div className="flex gap-2">
                       <input
                         type="text"
-                        placeholder="例: SQL, 因果推論, OJT"
+                        placeholder="新しいタグを手入力 (例: SQL, 因果推論) ※Enterまたはカンマで追加"
                         value={formTagInput}
                         onChange={(e) => setFormTagInput(e.target.value)}
                         onKeyDown={(e) => {
@@ -2692,26 +2764,88 @@ export default function App() {
                         onClick={() => handleAddTag(formTagInput)}
                         className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                       >
-                        追加
+                        手入力を追加
                       </button>
                     </div>
+
+                    {/* 現在この記録に選択されているタグ一覧 */}
                     {formTags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mr-1">
+                          選択中 ({formTags.length}):
+                        </span>
                         {formTags.map((t) => (
                           <span
                             key={t}
-                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-600 text-white shadow-sm"
                           >
                             #{t}
                             <button
                               type="button"
                               onClick={() => handleRemoveTagFromForm(t)}
-                              className="text-slate-400 hover:text-rose-500"
+                              className="text-indigo-200 hover:text-white"
+                              title="選択解除"
                             >
                               <X className="w-3 h-3" />
                             </button>
                           </span>
                         ))}
+                      </div>
+                    )}
+
+                    {/* 定義済みタグからクリックで選択（トグル） */}
+                    {selectableTags.length > 0 && (
+                      <div className="rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                            <Tag className="w-3 h-3" />
+                            定義済みタグからクリックで選択（再クリックで解除）
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            全 {selectableTags.length} 個
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectableTags
+                            .filter((tag) => {
+                              const q = formTagInput.trim().replace(/^#/, '').toLowerCase();
+                              if (!q) return true;
+                              return true;
+                            })
+                            .sort((a, b) => {
+                              const q = formTagInput.trim().replace(/^#/, '').toLowerCase();
+                              if (!q) return 0;
+                              const aMatch = a.toLowerCase().includes(q) ? 0 : 1;
+                              const bMatch = b.toLowerCase().includes(q) ? 0 : 1;
+                              return aMatch - bMatch;
+                            })
+                            .map((tag) => {
+                              const isSelected = formTags.includes(tag);
+                              const q = formTagInput.trim().replace(/^#/, '').toLowerCase();
+                              const isInputMatched = Boolean(q && tag.toLowerCase().includes(q));
+                              return (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => handleToggleTagInForm(tag)}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                                    isSelected
+                                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                      : isInputMatched
+                                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border-amber-400 dark:border-amber-600 ring-1 ring-amber-400/50'
+                                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400'
+                                  }`}
+                                >
+                                  {isSelected ? (
+                                    <Check className="w-3 h-3" />
+                                  ) : (
+                                    <Plus className="w-3 h-3 text-slate-400" />
+                                  )}
+                                  <span>#{tag}</span>
+                                </button>
+                              );
+                            })}
+                        </div>
                       </div>
                     )}
                   </div>
