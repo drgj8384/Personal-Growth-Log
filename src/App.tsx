@@ -45,7 +45,8 @@ import {
   deleteDoc,
   getDocs,
   getDoc,
-  writeBatch
+  writeBatch,
+  getFirestore
 } from 'firebase/firestore';
 import { db } from './firebase';
 
