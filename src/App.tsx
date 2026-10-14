@@ -168,14 +168,20 @@ function openLocalDB(): Promise<IDBDatabase> {
 }
 
 async function dbGetAllLogs(): Promise<GrowthLog[]> {
-  // 1. Firestore が有効な場合は Firestore から取得し、ローカル IndexedDB にもキャッシュする
+  // 1. Firestore から取得（2.5秒でタイムアウトしてローカルIndexedDBにフォールバック）
   if (isFirebaseConfigured()) {
     try {
-      const snapshot = await getDocs(collection(db, FIRESTORE_LOGS_COLLECTION));
+      const fetchPromise = getDocs(collection(db, FIRESTORE_LOGS_COLLECTION));
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore timeout')), 2500)
+      );
+
+      const snapshot = await Promise.race([fetchPromise, timeoutPromise]);
       const remoteLogs: GrowthLog[] = [];
       snapshot.forEach((docSnap) => {
         remoteLogs.push(docSnap.data() as GrowthLog);
       });
+
       if (remoteLogs.length > 0) {
         const idb = await openLocalDB();
         const tx = idb.transaction(STORE_NAME, 'readwrite');
@@ -184,7 +190,7 @@ async function dbGetAllLogs(): Promise<GrowthLog[]> {
         return remoteLogs;
       }
     } catch (err) {
-      console.warn('Firestore fetch failed, falling back to local IndexedDB:', err);
+      console.warn('Firestore fetch failed or timed out, falling back to local IndexedDB:', err);
     }
   }
 
@@ -274,7 +280,11 @@ async function dbClearAndSeed(logs: GrowthLog[]): Promise<void> {
 async function fetchTagRegistry(): Promise<string[] | null> {
   if (isFirebaseConfigured()) {
     try {
-      const snap = await getDoc(doc(db, FIRESTORE_META_COLLECTION, FIRESTORE_TAG_DOC));
+      const fetchPromise = getDoc(doc(db, FIRESTORE_META_COLLECTION, FIRESTORE_TAG_DOC));
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout')), 2500)
+      );
+      const snap = await Promise.race([fetchPromise, timeoutPromise]);
       if (snap.exists()) {
         const data = snap.data();
         if (Array.isArray(data.tags)) {
